@@ -18,20 +18,14 @@ type KeyTemplate struct {
 func Encode(k *KeyTemplate) []byte {
 	var b cryptobyte.Builder
 	b.AddASN1(asn1.SEQUENCE, func(b *cryptobyte.Builder) {
-		privb := tpm2.Marshal(k.private)
-		fmt.Printf("private length: %v\n", len(privb))
-		b.AddASN1OctetString(privb)
-		public := tpm2.New2B(k.public)
-		pubb := tpm2.Marshal(public)
-		fmt.Printf("public length: %v\n", len(pubb))
-		b.AddASN1OctetString(pubb)
+		b.AddASN1OctetString(tpm2.Marshal(k.private))
+		b.AddASN1OctetString(tpm2.Marshal(tpm2.New2B(k.public)))
 		b.AddASN1OctetString(k.seed)
 	})
 	return b.BytesOrPanic()
 }
 
 func Decode(b []byte) (*KeyTemplate, error) {
-	fmt.Println(len(b))
 	var k KeyTemplate
 	s := cryptobyte.String(b)
 	if !s.ReadASN1(&s, asn1.SEQUENCE) {
@@ -46,17 +40,12 @@ func Decode(b []byte) (*KeyTemplate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not parse private section of key: %v", err)
 	}
-
-	fmt.Printf("private length: %v\n", len(privkey))
 	k.private = *private
-
-	fmt.Println(len(s))
 
 	var pubkey cryptobyte.String
 	if !s.ReadASN1(&pubkey, asn1.OCTET_STRING) {
 		return nil, errors.New("could not parse pubkey")
 	}
-	fmt.Printf("public length: %v\n", len(pubkey))
 	public, err := tpm2.Unmarshal[tpm2.TPM2BPublic](pubkey)
 	if err != nil {
 		return nil, errors.New("could not parse public section of key")
