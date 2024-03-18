@@ -16,7 +16,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	signer := &TPMKey{tpm}
+	signer := &TPMKey{tpm: tpm}
 
 	s := ctapkey.Server{
 		Signer:   signer,
