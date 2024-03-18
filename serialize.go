@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/go-tpm/tpm2"
 	"golang.org/x/crypto/cryptobyte"
-	"golang.org/x/crypto/cryptobyte/asn1"
 )
 
 type KeyTemplate struct {
@@ -17,10 +16,16 @@ type KeyTemplate struct {
 
 func Encode(k *KeyTemplate) []byte {
 	var b cryptobyte.Builder
-	b.AddASN1(asn1.SEQUENCE, func(b *cryptobyte.Builder) {
-		b.AddASN1OctetString(tpm2.Marshal(k.private))
-		b.AddASN1OctetString(tpm2.Marshal(tpm2.New2B(k.public)))
-		b.AddASN1OctetString(k.seed)
+	b.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) {
+		for _, bytes := range [][]byte{
+			tpm2.Marshal(k.private),
+			tpm2.Marshal(tpm2.New2B(k.public)),
+			k.seed,
+		} {
+			b.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) {
+				b.AddBytes([]byte(bytes))
+			})
+		}
 	})
 	return b.BytesOrPanic()
 }
@@ -28,25 +33,29 @@ func Encode(k *KeyTemplate) []byte {
 func Decode(b []byte) (*KeyTemplate, error) {
 	var k KeyTemplate
 	s := cryptobyte.String(b)
-	if !s.ReadASN1(&s, asn1.SEQUENCE) {
-		return nil, errors.New("no sequence")
+	if !s.ReadUint8LengthPrefixed(&s) {
+		return nil, errors.New("no sequence 1")
 	}
 
-	var privkey cryptobyte.String
-	if !s.ReadASN1(&privkey, asn1.OCTET_STRING) {
-		return nil, errors.New("could not parse private section")
+	// Reads the outer length of our 3 value pack
+	var value cryptobyte.String
+	if !s.ReadUint8LengthPrefixed(&value) {
+		return nil, errors.New("no sequence 2")
 	}
-	private, err := tpm2.Unmarshal[tpm2.TPM2BPrivate](privkey)
+
+	// Private portion
+	private, err := tpm2.Unmarshal[tpm2.TPM2BPrivate](value)
 	if err != nil {
 		return nil, fmt.Errorf("could not parse private section of key: %v", err)
 	}
 	k.private = *private
 
-	var pubkey cryptobyte.String
-	if !s.ReadASN1(&pubkey, asn1.OCTET_STRING) {
-		return nil, errors.New("could not parse pubkey")
+	if !s.ReadUint8LengthPrefixed(&value) {
+		return nil, errors.New("no sequence 3")
 	}
-	public, err := tpm2.Unmarshal[tpm2.TPM2BPublic](pubkey)
+
+	// Public portion
+	public, err := tpm2.Unmarshal[tpm2.TPM2BPublic](value)
 	if err != nil {
 		return nil, errors.New("could not parse public section of key")
 	}
@@ -56,11 +65,11 @@ func Decode(b []byte) (*KeyTemplate, error) {
 	}
 	k.public = *publicT
 
-	var seed cryptobyte.String
-	if !s.ReadASN1(&seed, asn1.OCTET_STRING) {
-		return nil, errors.New("could not parse seed")
+	// Seed portion
+	if !s.ReadUint8LengthPrefixed(&value) {
+		return nil, errors.New("no sequence 4")
 	}
-	k.seed = seed
+	k.seed = value
 
 	return &k, nil
 }
